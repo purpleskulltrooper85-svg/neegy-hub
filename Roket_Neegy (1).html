@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#12376f" />
+  <title>Car Soccer</title>
+  <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
+  <link rel="manifest" href="site.webmanifest" />
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #0b0e14; }
+    #app { height: 100%; }
+    #boot-splash {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      background: #0b0e14; color: #dfe6f3; z-index: 9999;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      transition: opacity .4s ease; pointer-events: none;
+    }
+    #boot-splash.hide { opacity: 0; }
+    #boot-splash .spinner {
+      width: 44px; height: 44px; border-radius: 50%;
+      border: 4px solid rgba(255,255,255,.15); border-top-color: #4f8ef7;
+      animation: boot-spin 0.9s linear infinite;
+    }
+    #boot-splash .bar-wrap {
+      width: min(420px, 78vw); height: 14px; border-radius: 7px;
+      background: rgba(255,255,255,.10); overflow: hidden;
+      box-shadow: inset 0 1px 3px rgba(0,0,0,.5);
+    }
+    #boot-splash .bar {
+      height: 100%; width: 0%; border-radius: 7px;
+      background: linear-gradient(90deg, #3b6fe0, #4f8ef7, #7fb0ff);
+      background-size: 200% 100%;
+      animation: boot-bar-slide 1.2s linear infinite;
+      transition: width .25s ease;
+    }
+    @keyframes boot-bar-slide { to { background-position: -200% 0; } }
+    #boot-splash .pct { font-variant-numeric: tabular-nums; font-size: 12px; opacity: .75; }
+    @keyframes boot-spin { to { transform: rotate(360deg); } }
+    #boot-splash.error { pointer-events: auto; }
+    #boot-splash.error .spinner, #boot-splash.error .bar-wrap, #boot-splash.error .pct { display: none; }
+    #boot-splash .msg { max-width: 640px; text-align: center; line-height: 1.5; font-size: 14px; padding: 0 16px; }
+    #boot-splash.error .msg { color: #ff9d9d; white-space: pre-line; }
+  </style>
+  <script>
+  /* ============================================================================
+   * Car Soccer - single-file web port loader
+   *
+   * The original bundle resolves assets with origin-rooted paths like
+   * "/assets/..." and spawns a module worker via `new URL(..., import.meta.url)`,
+   * so it can only load from car-soccer.com itself. This loader makes it run
+   * from anywhere by:
+   *   1. rewriting every asset URL (fetch / <img> / Worker / inside-worker) to
+   *      an asset CDN,
+   *   2. wrapping cross-origin workers into same-origin blob workers,
+   *   3. stubbing the offline service worker handshake when the real one
+   *      (game-sw.js) is unavailable on the current origin.
+   *
+   * CDN resolution order:
+   *   - window.CAR_SOCCER_CDN  (edit the line below for a permanent setting)
+   *   - "?cdn=..." query parameter  (also remembered in localStorage)
+   *   - localStorage "car-soccer:cdn"
+   *   - empty string: assets served from the folder next to this index.html
+   *     (works for local static servers and GitHub Pages)
+   *
+   * Example CDN value once this repo is on GitHub (repo must be public):
+   *   https://cdn.jsdelivr.net/gh/<user>/car-soccer-web@main
+   * ==========================================================================*/
+  (function () {
+    "use strict";
+
+    // Boot diagnostics (visible via window.__bootlog in DevTools)
+    try {
+      window.__bootlog = [];
+      window.addEventListener("error", function (e) {
+        window.__bootlog.push("ERR " + e.message + " @ " + (e.filename || "").split("/").pop() + ":" + e.lineno);
+      });
+      window.addEventListener("unhandledrejection", function (e) {
+        var r = e.reason;
+        window.__bootlog.push("REJ " + (r && (r.stack || r.message) || String(r)).slice(0, 500));
+      });
+    } catch (e) {}
+
+    // ----- configuration -----------------------------------------------------
+    // Default asset source: the "car-soccer-assets" GitHub repo via jsDelivr.
+    // 1. Push C:\Users\purpl\Downloads\car-soccer-assets to a PUBLIC GitHub repo
+    // 2. Replace YOUR-USERNAME below (or open with ?cdn=<base-url> once - it sticks)
+    var CDN = "https://cdn.jsdelivr.net/gh/purpleskulltrooper85-svg/car-soccer-assets@main";
+    try {
+      if (window.CAR_SOCCER_CDN) CDN = String(window.CAR_SOCCER_CDN).trim();
+      var qs = new URLSearchParams(location.search);
+      var p = qs.get("cdn");
+      if (p) {
+        CDN = p.trim();
+        try { localStorage.setItem("car-soccer:cdn", CDN); } catch (e) {}
+      } else if (CDN.indexOf("YOUR-USERNAME") >= 0) {
+        // Placeholder not replaced yet - use a saved value or local files instead.
+        var saved0 = null;
+        try { saved0 = localStorage.getItem("car-soccer:cdn"); } catch (e) {}
+        CDN = saved0 ? saved0.trim() : "";
+      } else if (!CDN) {
+        var ls = null;
+        try { ls = localStorage.getItem("car-soccer:cdn"); } catch (e) {}
+        if (ls) CDN = ls.trim();
+      }
+    } catch (e) {}
+    if (CDN) CDN = CDN.replace(/\/+$/, "");
+
+    // Preconnect to the CDN origin as early as possible - this overlaps DNS
+    // lookup + TLS handshake with the rest of page setup below, instead of
+    // paying for it only once the first asset request actually goes out.
+    // Small win per-request, but it's pure latency shaved off every load.
+    try {
+      if (CDN) {
+        var cdnOrigin = new URL(CDN, location.href).origin;
+        var pc = document.createElement("link");
+        pc.rel = "preconnect"; pc.href = cdnOrigin; pc.crossOrigin = "anonymous";
+        document.head.appendChild(pc);
+        var dp = document.createElement("link");
+        dp.rel = "dns-prefetch"; dp.href = cdnOrigin;
+        document.head.appendChild(dp);
+      }
+    } catch (e) {}
+
+    var locationDir = location.pathname.replace(/[^\/]*$/, "");
+    // CDN mode: files sit at the repo root. Local mode: ./assets/ next to index.html.
+    var PREFIX = CDN ? CDN + "/" : locationDir + "assets/";
+    // Normalize once to a fully absolute URL: on file:// the pathname is
+    // "/C:/..." and path-relative strings are unusable for fetch/XHR.
+    try { PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
+    var ABS_PREFIX = PREFIX;
+
+    function rewrite(s) {
+      if (typeof s !== "string") return s;
+      // Scan for the "/assets/" marker FIRST: a URL that still contains it
+      // (e.g. new URL("/assets/w.js", import.meta.url)) must be rewritten even
+      // when it happens to start with the CDN prefix.
+      var i = s.indexOf("/assets/");
+      if (i >= 0) return PREFIX + s.slice(i + 8);
+      if (s.indexOf(PREFIX) === 0) return s;
+      if (s.indexOf("assets/") === 0) return PREFIX + s.slice(7);
+      return s;
+    }
+
+    // ----- fetch patch ---------------------------------------------------------
+    var realFetch = typeof window.fetch === "function" ? window.fetch.bind(window) : null;
+
+    var MIME = {
+      gltf: "model/gltf+json", glb: "model/gltf-binary", json: "application/json",
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
+      ktx2: "image/ktx2", basis: "image/basis", bin: "application/octet-stream",
+      wasm: "application/wasm", mp3: "audio/mpeg", ogg: "audio/ogg", wav: "audio/wav",
+      webm: "audio/webm", m4a: "audio/mp4", css: "text/css", js: "text/javascript"
+    };
+    function guessMime(url) {
+      var m = /\.([A-Za-z0-9]+)(?:\?|$)/.exec(url);
+      return m ? (MIME[m[1].toLowerCase()] || "application/octet-stream") : "application/octet-stream";
+    }
+
+    // fetch() is unavailable for file: URLs; fall back to XHR (works with status 0).
+    function xhrToResponse(url, init) {
+      return new Promise(function (resolve, reject) {
+        try {
+          var x = new XMLHttpRequest();
+          x.open((init && init.method) || "GET", url, true);
+          if (init && init.headers) {
+            try { for (var k in init.headers) x.setRequestHeader(k, init.headers[k]); } catch (e) {}
+          }
+          x.responseType = "arraybuffer";
+          x.onload = function () {
+            resolve(new Response(x.response, {
+              status: x.status === 0 ? 200 : x.status,
+              statusText: x.status === 0 ? "OK" : x.statusText,
+              headers: { "Content-Type": guessMime(url) }
+            }));
+          };
+          x.onerror = function () { reject(new TypeError("Failed to fetch " + url)); };
+          x.onabort = function () { reject(new DOMException("Aborted", "AbortError")); };
+          x.send(null);
+        } catch (e) { reject(e); }
+      });
+    }
+
+    function isFileUrl(s) { return typeof s === "string" && s.indexOf("file:") === 0; }
+
+    function logFetch(u) {
+      try { if (window.__bootlog && window.__bootlog.length < 400) window.__bootlog.push("FETCH " + u); } catch (e) {}
+    }
+
+    if (realFetch) {
+      window.fetch = function (input, init) {
+        try {
+          var urlStr = null, reqObj = null;
+          if (input && typeof input === "object" && typeof input.url === "string") { reqObj = input; urlStr = input.url; }
+          else if (input instanceof URL) urlStr = input.href;
+          else if (typeof input === "string") urlStr = input;
+          if (urlStr != null) {
+            logFetch(urlStr);
+            var rurl = rewrite(urlStr);
+            if (isFileUrl(rurl)) return xhrToResponse(rurl, reqObj || init);
+            if (reqObj) return realFetch(new Request(rurl, reqObj), init);
+            return realFetch(rurl, init);
+          }
+        } catch (e) {}
+        return realFetch(input, init);
+      };
+    }
+
+    // ----- <img> patch (three.js ImageLoader and `new Image`) -------------------
+    if (typeof HTMLImageElement !== "undefined") {
+      var imgSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+      var guard = function (el) {
+        try {
+          if (el instanceof HTMLImageElement && !el.__csPatched) {
+            el.__csPatched = true;
+            Object.defineProperty(el, "src", {
+              get: function () { return imgSrc.get.call(el); },
+              set: function (v) { imgSrc.set.call(el, rewrite(v)); },
+              configurable: true, enumerable: true
+            });
+          }
+        } catch (e) {}
+        return el;
+      };
+      var rawCE = document.createElement.bind(document);
+      document.createElement = function () {
+        return guard(rawCE.apply(null, arguments));
+      };
+      if (document.createElementNS) {
+        var rawCENS = document.createElementNS.bind(document);
+        document.createElementNS = function () {
+          return guard(rawCENS.apply(null, arguments));
+        };
+      }
+      var rawSetAttr = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function (name, value) {
+        try {
+          if (this instanceof HTMLImageElement && String(name).toLowerCase() === "src")
+            return rawSetAttr.call(this, name, rewrite(value));
+        } catch (e) {}
+        return rawSetAttr.call(this, name, value);
+      };
+      var RawImage = window.Image;
+      window.Image = function (w, h) { return guard(new RawImage(w, h)); };
+      window.Image.prototype = RawImage.prototype;
+    }
+
+    // ----- innerHTML patch: imgs inserted via HTML strings bypass createElement -
+    try {
+      var ihDesc = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+      if (ihDesc && ihDesc.set) {
+        Object.defineProperty(Element.prototype, "innerHTML", {
+          get: ihDesc.get,
+          set: function (v) {
+            try {
+              if (typeof v === "string" && v.indexOf("/assets/") >= 0)
+                v = v.split('"/assets/').join('"' + ABS_PREFIX)
+                     .split("'/assets/").join("'" + ABS_PREFIX);
+            } catch (e) {}
+            ihDesc.set.call(this, v);
+          },
+          configurable: true, enumerable: true
+        });
+      }
+    } catch (e) {}
+
+    // ----- Worker wrapper (cross-origin / subpath-safe blob workers) ------------
+    // Blob module workers are broken on file:// pages in Chrome, so every worker
+    // becomes a CLASSIC blob worker injected with a self-replicating prelude:
+    // faked location (blob: bases break new URL), rewritten fetch/XHR, and a
+    // nested-worker patch (ORT's pthread pool spawns new Worker(location.href,
+    // {type:"module"}) which would otherwise be a refused cross-origin worker).
+    var RawWorker = window.Worker;
+
+    var WORKER_PRELUDE_TEMPLATE = [
+      'var __PREFIX=__PREFIX__;',
+      'var __HREF=__HREF__;',
+      'var __T=__TPL__;',
+      'try{var __lu=new URL(__HREF);var __loc={href:__lu.href,protocol:__lu.protocol,host:__lu.host,hostname:__lu.hostname,port:__lu.port,pathname:__lu.pathname,search:"",hash:"",origin:__lu.origin};',
+      'Object.defineProperty(self,"location",{get:function(){return __loc},configurable:true})}catch(e){}',
+      'var __rw=function(u){try{',
+      'if(typeof u==="string"){',
+      'var i=u.indexOf("/assets/");if(i>=0)return __PREFIX+u.slice(i+8);',
+      'if(u.indexOf(__PREFIX)===0)return u;',
+      'if(u.indexOf("assets/")===0)return __PREFIX+u.slice(7);',
+      '}else if(u&&typeof u.url==="string"){return __rw(u.url)}',
+      '}catch(e){}return u};',
+      'var __f=self.fetch?self.fetch.bind(self):null;',
+      'var __mime=function(u){var m=/\\.([A-Za-z0-9]+)(?:\\?|$)/.exec(u);return m&&({"gltf":"model/gltf+json","glb":"model/gltf-binary","json":"application/json","bin":"application/octet-stream","wasm":"application/wasm","onnx":"application/octet-stream"}[m[1].toLowerCase()])||"application/octet-stream"};',
+      'var __xhr=function(u,o){return new Promise(function(res,rej){try{var x=new XMLHttpRequest();x.open((o&&o.method)||"GET",u,true);x.responseType="arraybuffer";x.onload=function(){res(new Response(x.response,{status:x.status===0?200:x.status,headers:{"Content-Type":__mime(u)}}))};x.onerror=function(){rej(new TypeError("Failed to fetch "+u))};x.onabort=function(){rej(new DOMException("Aborted","AbortError"))};x.send(null)}catch(e){rej(e)}})};',
+      'if(__f){self.fetch=function(i,o){try{var s=(i&&typeof i.url==="string")?i.url:(typeof i==="string"?i:(i&&i.href)||null);',
+      'if(s!=null){var r2=__rw(s);if(r2.indexOf("file:")===0)return __xhr(r2,o);',
+      'if(i&&typeof i.url==="string")return __f(new Request(r2,i),o);return __f(r2,o)}}catch(e){}return __f(i,o)}}',
+      'var __xo=XMLHttpRequest.prototype.open;',
+      'XMLHttpRequest.prototype.open=function(){var a=Array.prototype.slice.call(arguments);',
+      'a[1]=__rw(a[1]);return __xo.apply(this,a)};',
+      'var __RW=self.Worker;',
+      'self.Worker=function(u,o){',
+      'var s=(u&&typeof u==="object"&&"href" in u)?u.href:String(u);',
+      'var abs=s;try{abs=new URL(s,__loc.href).href}catch(e){}',
+      'var txt=null;try{var x2=new XMLHttpRequest();x2.open("GET",abs,false);x2.send(null);',
+      'if(x2.status>=200&&x2.status<300||x2.status===0)txt=x2.responseText}catch(e){}',
+      'if(txt==null)return new __RW(abs,o);',
+      'var pre2=self.__T.split("__HREF"+"__").join(JSON.stringify(abs)).split("__PREFIX"+"__").join(JSON.stringify(__PREFIX)).split("__TPL"+"__").join("null");',
+      'var b2=new Blob([pre2+"self.__T="+JSON.stringify(self.__T)+";"+txt.split("/assets/").join(__PREFIX)],{type:"application/javascript"});',
+      'return new __RW(URL.createObjectURL(b2))};',
+      'self.Worker.prototype=__RW.prototype;'
+    ].join("");
+
+    function preludeFor(absUrl) {
+      return WORKER_PRELUDE_TEMPLATE
+        .split("__PREFIX__").join(JSON.stringify(ABS_PREFIX))
+        .split("__HREF__").join(JSON.stringify(absUrl))
+        .split("__TPL__").join(JSON.stringify(WORKER_PRELUDE_TEMPLATE));
+    }
+
+    window.Worker = function (url, opts) {
+      var raw = (url && typeof url === "object" && "href" in url) ? url.href : String(url);
+      var abs = rewrite(raw);
+      var isModule = !!(opts && opts.type === "module");
+      var text = null;
+      try {
+        var x = new XMLHttpRequest();
+        x.open("GET", abs, false); // sync: Worker constructors cannot await
+        x.send(null);
+        if (x.status >= 200 && x.status < 300 || x.status === 0) text = x.responseText;
+      } catch (e) {}
+      var body;
+      if (text != null) {
+        body = preludeFor(abs) + text.split('"/assets/').join('"' + ABS_PREFIX)
+                                     .split("'/assets/").join("'" + ABS_PREFIX)
+                                     .split("`/assets/").join("`" + ABS_PREFIX);
+      } else if (isModule) {
+        body = preludeFor(abs) + 'import(' + JSON.stringify(abs) + ').catch(function(e){setTimeout(function(){throw e},0)});';
+      } else {
+        body = preludeFor(abs) + 'importScripts(' + JSON.stringify(abs) + ');';
+      }
+      var blob = new Blob([body], { type: "application/javascript" });
+      return new RawWorker(URL.createObjectURL(blob));
+    };
+    window.Worker.prototype = RawWorker.prototype;
+
+    // ----- service worker stubs (only when the real game-sw.js can't work) ------
+    try {
+      if (!window.isSecureContext)
+        Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
+    } catch (e) {}
+    try {
+      if (!("caches" in window)) {
+        window.caches = {
+          open: async function () {
+            return {
+              match: async function () { return undefined; },
+              put: async function () {},
+              keys: async function () { return []; },
+              delete: async function () { return true; }
+            };
+          },
+          has: async function () { return false; },
+          keys: async function () { return []; },
+          delete: async function () { return true; }
+        };
+      }
+    } catch (e) {}
+    if ("serviceWorker" in navigator) {
+      var sw = navigator.serviceWorker;
+      var realRegister = sw.register.bind(sw);
+      var realGet = sw.getRegistration.bind(sw);
+      var realReady = null;
+      try { realReady = sw.ready; } catch (e) {}
+      var fakeReg = null;
+      var makeFake = function () {
+        if (fakeReg) return fakeReg;
+        // Origin-independent scriptURL: the game only checks that
+        // new URL(scriptURL).pathname === "/game-sw.js", so pin an absolute
+        // https URL and never depend on location.host (unreliable on file://).
+        var active = {
+          scriptURL: "https://car-soccer-loader.local/game-sw.js",
+          state: "activated",
+          postMessage: function (msg, transfer) {
+            var port = transfer && transfer[0];
+            if (port) setTimeout(function () {
+              try { port.postMessage({ kind: "offline-ready", completed: 0, total: 0 }); } catch (e) {}
+            }, 0);
+          }
+        };
+        fakeReg = {
+          installing: null, waiting: null, active: active, scope: "/",
+          update: function () { return Promise.resolve(); },
+          unregister: function () { return Promise.resolve(true); },
+          addEventListener: function () {}, removeEventListener: function () {}
+        };
+        return fakeReg;
+      };
+
+      var isFilePage = location.protocol === "file:";
+      var swapped = false;
+
+      if (isFilePage) {
+        // Nuclear option: swap the entire ServiceWorkerContainer on file:// pages
+        // so no real implementation quirk can leak through.
+        var fakeContainer = {
+          get controller() { return makeFake().active; },
+          ready: Promise.resolve(makeFake()),
+          register: function () { return Promise.resolve(makeFake()); },
+          getRegistration: function () { return Promise.resolve(undefined); },
+          getRegistrations: function () { return Promise.resolve([]); },
+          startMessages: function () {},
+          addEventListener: function () {}, removeEventListener: function () {},
+          dispatchEvent: function () { return false; },
+          onmessage: null, oncontrollerchange: null
+        };
+        try {
+          Object.defineProperty(navigator, "serviceWorker", {
+            get: function () { return fakeContainer; },
+            configurable: true
+          });
+          swapped = true;
+        } catch (e) {}
+      }
+
+      if (!swapped) {
+        sw.register = function (u, o) {
+          if (isFilePage) return Promise.resolve(makeFake());
+          return realRegister(u, o).then(function (reg) {
+            try {
+              if (!reg || (!reg.active && !reg.waiting && !reg.installing)) return makeFake();
+            } catch (e) { return makeFake(); }
+            return reg;
+          }).catch(function () { return makeFake(); });
+        };
+        sw.getRegistration = function () {
+          if (isFilePage) return Promise.resolve(undefined);
+          return realGet.apply(sw, arguments).catch(function () { return null; });
+        };
+        try {
+          Object.defineProperty(sw, "ready", {
+            configurable: true,
+            get: function () {
+              if (isFilePage) return Promise.resolve(makeFake());
+              if (realReady && realReady.then) return realReady.catch(function () { return makeFake(); });
+              return Promise.resolve(makeFake());
+            }
+          });
+        } catch (e) {}
+      }
+    }
+
+    function boot() {
+      var splash = document.getElementById("boot-splash");
+      var splashMsg = document.getElementById("boot-msg");
+      var LOADER_VERSION = "v9";
+      try { window.LOADER_VERSION = LOADER_VERSION; } catch (e) {}
+      if (splashMsg) splashMsg.textContent = "Loading Car Soccer... (loader " + LOADER_VERSION + ")";
+
+      var bootBar = document.getElementById("boot-bar");
+      var bootPct = document.getElementById("boot-pct");
+      function setBar(p, label) {
+        if (bootBar) bootBar.style.width = Math.max(0, Math.min(100, p)) + "%";
+        if (bootPct) bootPct.textContent = label || (Math.round(p) + "%");
+      }
+      function fail(msg) {
+        if (!splash) return;
+        splash.classList.add("error");
+        splashMsg.textContent = msg;
+      }
+      function hideSplash() {
+        if (splash) { splash.classList.add("hide"); setTimeout(function () { splash.remove(); }, 500); }
+      }
+
+      var entryURL = PREFIX + "game-DskACDFO.js";
+      var cssURL = PREFIX + "game-C5MKlKFb.css";
+
+      // WebGL availability check. On some Chromebook models the GPU is
+      // blacklisted/disabled (driver bugs, or hardware acceleration turned
+      // off by a device policy on managed/school machines), so the loader
+      // would otherwise finish "successfully" and just show a permanently
+      // blank canvas with no error at all.
+      function hasWebGL() {
+        try {
+          var c = document.createElement("canvas");
+          return !!(c.getContext("webgl2") || c.getContext("webgl") || c.getContext("experimental-webgl"));
+        } catch (e) { return false; }
+      }
+      if (!hasWebGL()) {
+        fail("This browser reports no WebGL support, which Car Soccer needs to run.\n\n" +
+             "On a Chromebook: check chrome://settings > System > \"Use hardware acceleration " +
+             "when available\" is on, then restart the browser. On a managed/school Chromebook " +
+             "this may be turned off by device policy.");
+        return;
+      }
+
+      // Small async-XHR helper with a timeout, so a slow or silently-blocked
+      // request surfaces as a clear message instead of a permanently frozen
+      // spinner (and doesn't block the main thread the way the previous
+      // synchronous requests here did, which could look like a frozen tab
+      // on slower/lower-powered devices).
+      function xhrAsync(method, url, timeoutMs) {
+        return new Promise(function (resolve) {
+          try {
+            var x = new XMLHttpRequest();
+            x.open(method, url, true);
+            if (timeoutMs) x.timeout = timeoutMs;
+            x.onload = function () { resolve({ ok: true, status: x.status, text: x.responseText }); };
+            x.onerror = function () { resolve({ ok: false, status: 0, text: null }); };
+            x.ontimeout = function () { resolve({ ok: false, status: 0, text: null, timedOut: true }); };
+            x.send(null);
+          } catch (e) { resolve({ ok: false, status: 0, text: null }); }
+        });
+      }
+
+      // Manifest + CSS don't depend on the entry bundle, so fetch them in
+      // parallel with it rather than one-after-another - each extra
+      // sequential round trip adds real wall-clock time to startup,
+      // especially on higher-latency connections (e.g. behind a school
+      // content filter, which is also where this tends to be slowest).
+      (function loadManifestAndCss() {
+        try {
+          var mLink0 = document.querySelector('link[rel="manifest"]');
+          if (location.protocol === "file:") {
+            if (mLink0) mLink0.remove();
+          } else {
+            var mURL = new URL("site.webmanifest", location.href).href;
+            xhrAsync("GET", mURL, 8000).then(function (mx) {
+              if (mx.ok && (mx.status >= 200 && mx.status < 300)) {
+                var mText = mx.text.split("/assets/").join(ABS_PREFIX);
+                if (mLink0) mLink0.href = URL.createObjectURL(new Blob([mText], { type: "application/manifest+json" }));
+              }
+            });
+          }
+        } catch (e) {}
+
+        // Inline the CSS with rewritten url() paths (a <link> would leave
+        // root-relative url(/assets/...) unpatched, breaking on file:// and subpaths).
+        xhrAsync("GET", cssURL, 12000).then(function (cx) {
+          if (cx.ok && (cx.status >= 200 && cx.status < 300 || cx.status === 0)) {
+            var cssText = cx.text.split("/assets/").join(ABS_PREFIX);
+            var style = document.createElement("style");
+            style.textContent = cssText;
+            document.head.appendChild(style);
+          } else {
+            var link = document.createElement("link");
+            link.rel = "stylesheet";
+            link.crossOrigin = "anonymous";
+            link.href = cssURL;
+            document.head.appendChild(link);
+          }
+        });
+      })();
+
+      // Start the entry bundle download right away, in parallel with the
+      // above. There used to be a separate HEAD "probe" request that had to
+      // finish first before this could even start - that was a whole extra
+      // round trip of pure latency for every load. The "not found" vs
+      // "blocked" distinction it made is now handled below, from this
+      // request's own onerror/onload.
+      downloadEntry();
+
+      // Pre-download the bundle with a real progress bar; the XHR fills the
+      // HTTP cache so the follow-up <script src> load is instant. When the
+      // total size is unknown (file://, missing content-length), fall back to
+      // a smooth asymptotic animation. A timeout turns a stuck download
+      // (e.g. a CDN domain silently dropped by a network filter) into a
+      // clear error instead of a spinner that never finishes.
+      function downloadEntry() {
+        setBar(2, "starting...");
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", entryURL, true);
+        xhr.responseType = "arraybuffer";
+        xhr.timeout = 45000;
+        var fakeTimer = setInterval(function () {
+          var cur = parseFloat(bootBar.style.width) || 2;
+          if (cur < 92) setBar(cur + (92 - cur) * 0.035);
+        }, 200);
+        xhr.onprogress = function (e) {
+          clearInterval(fakeTimer);
+          if (e.lengthComputable && e.total > 0) {
+            setBar(2 + (e.loaded / e.total) * 96);
+          } else {
+            var cur = parseFloat(bootBar.style.width) || 2;
+            if (cur < 92) setBar(cur + (92 - cur) * 0.15);
+          }
+        };
+        xhr.onload = function () {
+          clearInterval(fakeTimer);
+          if (!(xhr.status >= 200 && xhr.status < 300) && xhr.status !== 0) {
+            fail("Failed to download the game bundle (" + xhr.status + ") from:\n" + entryURL);
+            return;
+          }
+          setBar(100, "starting game...");
+          var script = document.createElement("script");
+          script.type = "module";
+          script.crossOrigin = "anonymous";
+          script.src = entryURL;
+          script.onerror = function () {
+            fail("Failed to load the game bundle from:\n" + entryURL +
+                 "\n\nIf using the default CDN: check the URL is correct and the repo is public.");
+          };
+          script.addEventListener("load", hideSplash);
+          document.body.appendChild(script);
+        };
+        xhr.onerror = function () {
+          clearInterval(fakeTimer);
+          if (!CDN) {
+            fail("Game assets were not found next to index.html (" + entryURL + ").\n\n" +
+                 "Serve this whole folder with any static server (e.g. \"npx serve\"),\n" +
+                 "or add ?cdn=<asset-base-url> to the page URL.");
+          } else {
+            fail("Could not download the game bundle from:\n" + entryURL +
+                 "\n\nIf this is a managed/school device, its network filter may be blocking this domain.\n" +
+                 "Check your connection, or add ?cdn=<asset-base-url> pointing at an allowed host.");
+          }
+        };
+        xhr.ontimeout = function () {
+          clearInterval(fakeTimer);
+          fail("Timed out downloading the game bundle from:\n" + entryURL +
+               "\n\nOn a school/managed Chromebook, a network filter may be silently blocking this domain.\n" +
+               "Try a different network, or add ?cdn=<asset-base-url> pointing at an allowed host.");
+        };
+        xhr.send(null);
+      }
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", boot);
+    } else {
+      boot();
+    }
+  })();
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="boot-splash">
+    <div class="msg" id="boot-msg">Loading Car Soccer...</div>
+    <div class="bar-wrap"><div class="bar" id="boot-bar"></div></div>
+    <div class="pct" id="boot-pct">0%</div>
+  </div>
+</body>
+</html>
